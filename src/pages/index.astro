@@ -1,0 +1,434 @@
+---
+const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f5f0" />
+    <meta name="description" content="Calendario compartido para organizar jornadas extraordinarias." />
+    <title>PONIENDO GUARDIAS</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="#inicio" aria-label="Jornadas, inicio">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+          <span>jornadas<span class="brand-dot">.</span></span>
+        </a>
+        <div class="save-status"><span class="status-dot"></span><span id="save-status">Guardado automáticamente</span></div>
+      </header>
+
+      <section class="intro" id="inicio">
+        <div>
+          <h1>PONIENDO GUARDIAS</h1>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Calendario y exportación">
+        <div class="calendar-panel">
+          <div class="calendar-toolbar">
+            <div class="month-controls">
+              <button class="icon-button" id="previous-month" aria-label="Mes anterior">←</button>
+              <h2 id="month-title"></h2>
+              <button class="icon-button" id="next-month" aria-label="Mes siguiente">→</button>
+            </div>
+            <button class="today-button" id="today-button">Hoy</button>
+          </div>
+          <div class="calendar-grid" id="calendar-grid" aria-label="Calendario mensual"></div>
+        </div>
+
+        <aside class="export-panel">
+          <div class="export-option"><div class="export-label"><span class="file-icon">T</span><div><strong>Jornadas de tarde</strong><small>Horas extra entre semana</small></div></div><button class="download-button" data-export="afternoon" aria-label="Descargar jornadas de tarde">TARDES</button></div>
+          <div class="export-option"><div class="export-label"><span class="file-icon saturday-file">S</span><div><strong>Sábados y festivos</strong><small>Guardias en sábado y festivo</small></div></div><button class="download-button" data-export="saturday" aria-label="Descargar sábados y festivos">SÁBADOS Y FESTIVOS</button></div>
+        </aside>
+      </section>
+
+      <footer><span>Hecho para que organizarse sea un poco más fácil.</span><span>Los datos se guardan en este dispositivo.</span></footer>
+    </main>
+
+    <script define:vars={{ people }}>
+      const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      const weekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+      const personColors = { 'ANDREA': 'andrea', 'JOSE LUIS': 'jose-luis', 'JUAN': 'juan', 'MIGUEL A.': 'miguel-a', 'NIEVES': 'nieves' };
+      const reportNames = {
+        'ANDREA': 'ANDREA GOMEZ ESTEBAN',
+        'JOSE LUIS': 'JOSE LUIS GARCIA ROMERO',
+        'JUAN': 'JUAN CASANOVA VAZQUEZ',
+        'MIGUEL A.': 'MIGUEL A. MARTIN VEGA',
+        'NIEVES': 'NIEVES VELASCO DE LAS HERAS',
+      };
+      const STORAGE_KEY = 'jornadas-extraordinarias-v1';
+      const MONTH_STORAGE_KEY = 'jornadas-extraordinarias-month-v1';
+      let visibleMonth = new Date();
+      let records = {};
+      try {
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        if (stored && typeof stored === 'object' && !Array.isArray(stored)) records = stored;
+        const savedMonth = localStorage.getItem(MONTH_STORAGE_KEY);
+        if (/^\d{4}-\d{2}$/.test(savedMonth || '')) {
+          const [savedYear, savedMonthNumber] = savedMonth.split('-').map(Number);
+          visibleMonth = new Date(savedYear, savedMonthNumber - 1, 1);
+        }
+      } catch { records = {}; }
+
+      const grid = document.querySelector('#calendar-grid');
+      const title = document.querySelector('#month-title');
+      const summary = document.querySelector('#month-summary');
+      const status = document.querySelector('#save-status');
+      const pad = (n) => String(n).padStart(2, '0');
+      const keyFor = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
+      const currentMonthKey = () => `${visibleMonth.getFullYear()}-${pad(visibleMonth.getMonth() + 1)}`;
+
+      function save() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+          localStorage.setItem(MONTH_STORAGE_KEY, currentMonthKey());
+          status.textContent = 'Guardado automáticamente';
+          updateSummary();
+        } catch {
+          status.textContent = 'No se pudo guardar en este navegador';
+        }
+      }
+
+      function updateSummary() {
+        if (!summary) return;
+        const count = Object.entries(records).filter(([date, record]) => date.startsWith(currentMonthKey()) && (record.person || record.note?.trim())).length;
+        summary.textContent = `${count} ${count === 1 ? 'jornada registrada' : 'jornadas registradas'}`;
+      }
+
+      function setCalendarHeight(weekCount = Number(grid.style.getPropertyValue('--week-count')) || 6) {
+        const mobile = window.matchMedia('(max-width: 620px)').matches;
+        const minHeight = mobile ? 420 : 380;
+        const reservedHeight = mobile ? 220 : 300;
+        const headerHeight = mobile ? 32 : 38;
+        const rowHeight = mobile ? 98 : 112;
+        const availableHeight = Math.max(window.innerHeight - reservedHeight, minHeight);
+        const maxHeight = headerHeight + weekCount * rowHeight;
+        grid.style.height = `${Math.min(availableHeight, maxHeight)}px`;
+      }
+
+      function render() {
+        const year = visibleMonth.getFullYear();
+        const month = visibleMonth.getMonth();
+        title.textContent = `${monthNames[month]} ${year}`;
+        grid.replaceChildren();
+        weekdays.forEach((day) => {
+          const label = document.createElement('div');
+          label.className = 'weekday';
+          label.textContent = day;
+          grid.append(label);
+        });
+        const firstOffset = (new Date(year, month, 1).getDay() + 6) % 7;
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const cells = Math.ceil((firstOffset + daysInMonth) / 7) * 7;
+        const weekCount = cells / 7;
+        grid.style.setProperty('--week-count', String(weekCount));
+        setCalendarHeight(weekCount);
+        for (let index = 0; index < cells; index++) {
+          const day = index - firstOffset + 1;
+          if (day < 1 || day > daysInMonth) {
+            const empty = document.createElement('div');
+            empty.className = 'day-cell outside';
+            grid.append(empty);
+            continue;
+          }
+          const key = keyFor(year, month, day);
+          const saved = records[key] || { person: '', note: '', type: '' };
+          const date = new Date(year, month, day);
+          const saturday = date.getDay() === 6;
+          const today = new Date();
+          const isToday = date.toDateString() === today.toDateString();
+          const cell = document.createElement('article');
+          cell.className = `day-cell${saturday ? ' saturday' : ''}${isToday ? ' is-today' : ''}`;
+          const dayTop = document.createElement('div');
+          dayTop.className = 'day-top';
+          const number = document.createElement('span');
+          number.className = 'day-number';
+          number.textContent = String(day);
+          if (isToday) number.setAttribute('aria-label', `${day}, hoy`);
+          dayTop.append(number);
+          cell.append(dayTop);
+
+          const select = document.createElement('select');
+          select.className = 'person-select';
+          select.setAttribute('aria-label', `Persona de guardia, ${day} de ${monthNames[month]}`);
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = '+';
+          select.append(placeholder);
+          people.forEach((person) => {
+            const option = document.createElement('option');
+            option.value = person;
+            option.textContent = person;
+            option.dataset.personColor = personColors[person];
+            select.append(option);
+          });
+          select.value = saved.person || '';
+          select.dataset.personColor = personColors[select.value] || '';
+          select.addEventListener('change', () => {
+            select.dataset.personColor = personColors[select.value] || '';
+            records[key] = { ...records[key], person: select.value };
+            save();
+          });
+          cell.append(select);
+
+          const note = document.createElement('textarea');
+          note.className = 'day-note';
+          note.placeholder = 'Escribe aquí…';
+          note.setAttribute('aria-label', `Notas para el ${day} de ${monthNames[month]}`);
+          note.value = saved.note || '';
+          note.addEventListener('input', () => {
+            records[key] = { ...records[key], note: note.value };
+            status.textContent = 'Guardando…';
+            save();
+          });
+          cell.append(note);
+
+          grid.append(cell);
+        }
+        updateSummary();
+      }
+
+      function xmlEscape(value) {
+        return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
+      }
+
+      function wordParagraph(text, { bold = false, size = 22, color = '243B34', align = '' } = {}) {
+        const pPr = align ? `<w:pPr><w:jc w:val="${align}"/></w:pPr>` : '';
+        const rPr = `<w:rPr>${bold ? '<w:b/>' : ''}<w:color w:val="${color}"/><w:sz w:val="${size}"/></w:rPr>`;
+        return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+      }
+
+      function wordLogoParagraph() {
+        return '<w:p><w:pPr><w:jc w:val="right"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><wp:extent cx="1500000" cy="350000"/><wp:docPr id="1" name="Logo Laredo"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="logo.jpg"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdLogo" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1500000" cy="350000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+      }
+
+      function wordCell(content, { fill = 'FFFFFF', width = 0, vertical = 'top' } = {}) {
+        const widthXml = width ? `<w:tcW w:w="${width}" w:type="dxa"/>` : '<w:tcW w:w="0" w:type="auto"/>';
+        const paragraphs = Array.isArray(content) ? content.join('') : content;
+        return `<w:tc><w:tcPr>${widthXml}<w:shd w:fill="${fill}"/><w:vAlign w:val="${vertical}"/></w:tcPr>${paragraphs || wordParagraph('')}</w:tc>`;
+      }
+
+      function wordTable(rows, widths, { header = true, rowHeight = 0 } = {}) {
+        const borders = '<w:tblBorders><w:top w:val="single" w:sz="5" w:color="C8D2CC"/><w:left w:val="single" w:sz="5" w:color="C8D2CC"/><w:bottom w:val="single" w:sz="5" w:color="C8D2CC"/><w:right w:val="single" w:sz="5" w:color="C8D2CC"/><w:insideH w:val="single" w:sz="4" w:color="DDE3DE"/><w:insideV w:val="single" w:sz="4" w:color="DDE3DE"/></w:tblBorders>';
+        const grid = widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('');
+        const body = rows.map((row, rowIndex) => `<w:tr>${rowHeight ? `<w:trPr><w:trHeight w:val="${header && rowIndex === 0 ? 500 : rowHeight}" w:hRule="atLeast"/></w:trPr>` : ''}${row.map((value, colIndex) => {
+          const isHeader = header && rowIndex === 0;
+          const text = typeof value === 'string' ? value : value.text;
+          const fill = isHeader ? 'EAF0EB' : (rowIndex % 2 === 0 ? 'FBFCFA' : 'FFFFFF');
+          return wordCell(wordParagraph(text, { bold: isHeader, size: isHeader ? 19 : 20, color: isHeader ? '304A3F' : '35423B' }), { fill, width: widths[colIndex] });
+        }).join('')}</w:tr>`).join('');
+        return `<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((sum, width) => sum + width, 0)}" w:type="dxa"/><w:tblLayout w:type="fixed"/>${borders}</w:tblPr><w:tblGrid>${grid}</w:tblGrid>${body}</w:tbl>`;
+      }
+
+      function crc32(bytes) {
+        let crc = 0xffffffff;
+        for (const byte of bytes) {
+          crc ^= byte;
+          for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+        }
+        return (crc ^ 0xffffffff) >>> 0;
+      }
+
+      function makeDocx(files) {
+        const encoder = new TextEncoder();
+        const locals = [];
+        const centrals = [];
+        let offset = 0;
+        for (const [path, content] of Object.entries(files)) {
+          const name = encoder.encode(path);
+          const data = typeof content === 'string' ? encoder.encode(content) : content;
+          const crc = crc32(data);
+          const local = new Uint8Array(30 + name.length + data.length);
+          const lv = new DataView(local.buffer);
+          lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+          lv.setUint16(8, 0, true); lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true); lv.setUint16(26, name.length, true);
+          local.set(name, 30); local.set(data, 30 + name.length); locals.push(local);
+          const central = new Uint8Array(46 + name.length);
+          const cv = new DataView(central.buffer);
+          cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(8, 0x0800, true);
+          cv.setUint16(10, 0, true); cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+          cv.setUint16(28, name.length, true); cv.setUint32(42, offset, true); central.set(name, 46); centrals.push(central);
+          offset += local.length;
+        }
+        const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
+        const end = new Uint8Array(22);
+        const ev = new DataView(end.buffer);
+        ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, centrals.length, true); ev.setUint16(10, centrals.length, true);
+        ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+        return new Blob([...locals, ...centrals, end], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      }
+
+      function isHoliday(record) { return /\bfestivo\b/i.test(record?.note || ''); }
+
+      async function download(kind) {
+        const period = currentMonthKey();
+        const monthNumber = visibleMonth.getMonth();
+        const year = visibleMonth.getFullYear();
+        const monthLabel = `${monthNames[monthNumber]} ${year}`;
+        const chosen = Object.entries(records)
+          .filter(([date, record]) => date.startsWith(period) && record.person)
+          .filter(([date, record]) => {
+            const weekday = new Date(`${date}T12:00:00`).getDay();
+            return kind === 'saturday' ? weekday === 6 || isHoliday(record) : weekday >= 1 && weekday <= 5 && !isHoliday(record);
+          })
+          .sort(([a], [b]) => a.localeCompare(b));
+        const widths = [1949, 1949, 1949, 1949, 1949];
+        let body = wordLogoParagraph();
+        if (kind === 'afternoon') {
+          const formalMonthLabel = `${monthLabel[0].toLocaleUpperCase('es-ES')}${monthLabel.slice(1)}`;
+          body += wordParagraph(`Asunto: Jornadas Extraordinarias TARDES de ${formalMonthLabel}`, { bold: true, size: 28, color: '243B34' });
+          body += wordParagraph('');
+          const weekdaysLong = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES'];
+          const rows = [weekdaysLong];
+          const firstOffset = (new Date(year, monthNumber, 1).getDay() + 6) % 7;
+          const daysInMonth = new Date(year, monthNumber + 1, 0).getDate();
+          const weeks = Math.ceil((firstOffset + daysInMonth) / 7);
+          for (let week = 0; week < weeks; week++) {
+            const row = [];
+            for (let weekday = 0; weekday < 5; weekday++) {
+              const day = week * 7 + weekday - firstOffset + 1;
+              if (day < 1 || day > daysInMonth) { row.push(''); continue; }
+              const record = records[keyFor(year, monthNumber, day)];
+              const dayOfWeek = new Date(year, monthNumber, day).getDay();
+              const afternoonRecord = record?.person && dayOfWeek >= 1 && dayOfWeek <= 5 && !isHoliday(record);
+              const entry = afternoonRecord ? `${day}\n${reportNames[record.person] || record.person}${record.note?.trim() ? `\n${record.note.trim()}` : ''}` : String(day);
+              row.push(entry);
+            }
+            rows.push(row);
+          }
+          const tableRows = rows.map((row, rowIndex) => `<w:tr>${row.map((value, colIndex) => {
+            const cellText = value.split('\n');
+            const paras = cellText.map((line, index) => wordParagraph(line, { bold: rowIndex === 0 || index === 0 || index === 1, size: rowIndex === 0 ? 18 : (index === 0 ? 24 : 17), color: rowIndex === 0 ? '304A3F' : (index === 1 ? '2457D6' : '35423B') }));
+            return wordCell(paras, { fill: rowIndex === 0 ? 'EAF0EB' : (rowIndex % 2 ? 'FFFFFF' : 'FBFCFA'), width: widths[colIndex] });
+          }).join('')}</w:tr>`).join('');
+          const borders = '<w:tblBorders><w:top w:val="single" w:sz="6" w:color="AEBEB2"/><w:left w:val="single" w:sz="6" w:color="AEBEB2"/><w:bottom w:val="single" w:sz="6" w:color="AEBEB2"/><w:right w:val="single" w:sz="6" w:color="AEBEB2"/><w:insideH w:val="single" w:sz="4" w:color="D8E0D9"/><w:insideV w:val="single" w:sz="4" w:color="D8E0D9"/></w:tblBorders>';
+          body += `<w:tbl><w:tblPr><w:tblW w:w="9745" w:type="dxa"/><w:tblLayout w:type="fixed"/>${borders}</w:tblPr><w:tblGrid>${widths.map((width) => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>${tableRows}</w:tbl>`;
+        } else {
+          const saturdayRows = [['FECHA', 'PERSONA', 'FIRMA']];
+          body += wordParagraph('Le informo, para que lo trasmita al Servicio de Administración, que la actividad farmacéutica extraordinaria, correspondiente a los días extra que se adjuntan en tabla anexa la realizaron los farmacéuticos indicados.', { size: 22, color: '35423B' });
+          body += wordParagraph('');
+          const daysInMonth = new Date(year, monthNumber + 1, 0).getDate();
+          for (let day = 1; day <= daysInMonth; day++) {
+            const date = keyFor(year, monthNumber, day);
+            const record = records[date] || {};
+            const weekday = new Date(year, monthNumber, day).getDay();
+            if (weekday !== 6 && !isHoliday(record)) continue;
+            const dateLabel = new Date(year, monthNumber, day).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+            saturdayRows.push([dateLabel, reportNames[record.person] || '', '']);
+          }
+          body += wordTable(saturdayRows, [2800, 3000, 3945], { rowHeight: 1000 });
+          body += wordParagraph('');
+          body += wordParagraph('En Laredo, a fecha de:                    ', { size: 22, color: '35423B', align: 'center' });
+        }
+
+        const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="850" w:right="1080" w:bottom="850" w:left="1080" w:header="425" w:footer="425" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+        const logoResponse = await fetch('/assets/logo.jpg');
+        if (!logoResponse.ok) throw new Error('No se pudo cargar assets/logo.jpg');
+        const logoBytes = new Uint8Array(await logoResponse.arrayBuffer());
+        const files = {
+          '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+          '_rels/.rels': '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+          'word/_rels/document.xml.rels': '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.jpg"/></Relationships>',
+          'word/document.xml': documentXml.replace('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'),
+          'word/media/logo.jpg': logoBytes,
+        };
+        const blob = makeDocx(files);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${kind === 'afternoon' ? 'jornadas-de-tarde' : 'sabados-y-festivos'}-${period}.docx`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      document.querySelector('#previous-month').addEventListener('click', () => { visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1); save(); render(); });
+      document.querySelector('#next-month').addEventListener('click', () => { visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1); save(); render(); });
+      document.querySelector('#today-button').addEventListener('click', () => { visibleMonth = new Date(); save(); render(); });
+      document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', () => download(button.dataset.export)));
+      window.addEventListener('pagehide', save);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(); });
+      window.addEventListener('resize', () => setCalendarHeight());
+      render();
+    </script>
+  </body>
+</html>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+  :global(*) { box-sizing: border-box; }
+  :global(body) { margin: 0; background: #f6f5f0; color: #202b29; font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; }
+  :global(button), :global(select), :global(textarea) { font: inherit; }
+  .shell { width: min(1320px, calc(100% - 72px)); margin: 0 auto; }
+  .topbar { height: 76px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e7e7df; }
+  .brand { display: flex; align-items: center; gap: 11px; color: #203732; text-decoration: none; font: 800 20px 'Manrope', sans-serif; letter-spacing: -1px; }
+  .brand-dot { color: #d58769; }
+  .brand-mark { width: 28px; height: 28px; padding: 5px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: #264b40; border-radius: 8px; transform: rotate(-4deg); }
+  .brand-mark span { background: #f6f5f0; border-radius: 2px; opacity: .95; }
+  .save-status { color: #6d7974; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+  .status-dot, .legend-dot { width: 7px; height: 7px; display: inline-block; border-radius: 99px; background: #79a684; }
+  .intro { display: flex; justify-content: space-between; align-items: end; gap: 30px; padding: 18px 0 14px; }
+  .eyebrow { display: flex; align-items: center; gap: 9px; color: #77817b; font-size: 10px; font-weight: 700; letter-spacing: 1.45px; }
+  .eyebrow-line { width: 19px; height: 1px; background: #d18a6b; }
+  h1 { margin: 0; font: 700 clamp(34px, 4vw, 49px)/1.12 'Manrope', sans-serif; letter-spacing: -2.1px; color: #233a34; }
+  h1 span { color: #b9bcb1; }
+  .intro-copy { color: #79817c; font-size: 14px; margin: 0; }
+  .tip-card { width: 285px; margin-bottom: 2px; display: flex; gap: 12px; padding: 15px 16px; background: #ebece4; border: 1px solid #e2e4da; border-radius: 9px; }
+  .tip-icon { width: 27px; height: 27px; display: grid; place-items: center; color: #fff; background: #63806d; border-radius: 7px; font-size: 15px; flex: none; }
+  .tip-card strong { font-size: 12px; font-weight: 700; }
+  .tip-card p { color: #737c74; font-size: 11px; line-height: 1.55; margin: 4px 0 0; }
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 290px; align-items: start; gap: 20px; }
+  .calendar-panel, .export-panel { min-width: 0; background: #fff; border: 1px solid #e9e9e3; border-radius: 11px; box-shadow: 0 5px 22px #33413808; }
+  .calendar-panel { overflow: hidden; }
+  .calendar-toolbar { height: 67px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #efefe9; }
+  .month-controls { display: flex; align-items: center; gap: 13px; }
+  .month-controls h2 { width: 200px; margin: 0; text-transform: capitalize; font: 800 22px 'Manrope', sans-serif; letter-spacing: -.55px; }
+  .icon-button { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid #e9eae4; border-radius: 6px; background: #fff; color: #54625b; cursor: pointer; font-size: 17px; }
+  .icon-button:hover, .today-button:hover { border-color: #9eb0a2; color: #264b40; }
+  .today-button { padding: 7px 12px; border: 1px solid #e7e8e2; border-radius: 6px; background: #fff; color: #52615a; font-size: 11px; font-weight: 600; cursor: pointer; }
+  .calendar-grid { width: 100%; min-width: 0; height: 600px; overflow: hidden; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: 37px repeat(var(--week-count, 6), minmax(0, 1fr)); gap: 1px; background: #e8eae4; border: 1px solid #e8eae4; }
+  .calendar-panel { border: 1px solid #27332f; }
+  :global(.weekday) { min-height: 0; display: grid; place-items: center; background: #fbfbf9; color: #2457d6; font-family: 'Manrope', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: .25px; }
+  :global(.day-cell) { min-height: 0; padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow: hidden; }
+  :global(.day-cell.outside) { background: #fbfbf9; }
+  :global(.day-cell.is-today) { box-shadow: inset 0 2px #6c8b76; }
+  :global(.day-top) { min-height: 18px; display: flex; justify-content: space-between; align-items: center; }
+  :global(.day-number) { width: 18px; height: 18px; display: grid; place-items: center; color: #2457d6; font-family: 'Manrope', sans-serif; font-size: 11px; font-weight: 800; }
+  :global(.is-today .day-number) { color: #fff; background: #64806d; border-radius: 50%; font-weight: 700; }
+  :global(.person-select) { width: 100%; min-width: 0; height: 25px; padding: 0 5px; color: #526258; border: 1px solid #e8eae4; border-radius: 5px; background-color: #fff; font-family: 'Manrope', sans-serif; font-size: 11px; font-weight: 800; outline: none; }
+  :global(.person-select[data-person-color="andrea"]), :global(.person-select option[data-person-color="andrea"]) { color: #8d3c16; background-color: #fff0e6; }
+  :global(.person-select[data-person-color="jose-luis"]), :global(.person-select option[data-person-color="jose-luis"]) { color: #234e91; background-color: #e9f1ff; }
+  :global(.person-select[data-person-color="juan"]), :global(.person-select option[data-person-color="juan"]) { color: #21613b; background-color: #e8f5eb; }
+  :global(.person-select[data-person-color="miguel-a"]), :global(.person-select option[data-person-color="miguel-a"]) { color: #603b91; background-color: #f1eaff; }
+  :global(.person-select[data-person-color="nieves"]), :global(.person-select option[data-person-color="nieves"]) { color: #96334f; background-color: #ffedf1; }
+  :global(.person-select:focus), :global(.day-note:focus) { border-color: #91aa99; }
+  :global(.day-note) { width: 100%; min-height: 0; flex: 1; resize: none; padding: 4px; color: #56615b; border: 1px solid #f0f0eb; border-radius: 5px; background: #fdfdfb; font-size: 9px; line-height: 1.35; outline: none; }
+  :global(.day-note::placeholder) { color: #bcc0b9; }
+  .calendar-footer { min-height: 43px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; color: #8b938c; font-size: 10px; }
+  .calendar-footer > span:first-child { display: flex; align-items: center; gap: 7px; }
+  .legend-dot { background: #d5a07e; width: 6px; height: 6px; }
+  .export-panel { margin-top: 0; padding: 20px 19px 17px; }
+  .export-heading { display: flex; align-items: center; gap: 11px; }
+  .export-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: #eaf0e9; color: #587660; font-size: 18px; }
+  .export-heading h2 { margin: 0; font: 700 14px 'Manrope', sans-serif; letter-spacing: -.3px; }
+  .export-heading p { margin: 4px 0 0; color: #898f89; font-size: 10px; }
+  .export-divider { height: 1px; margin: 18px 0 5px; background: #efefe9; }
+  .export-option { padding: 12px 0; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f0f0eb; }
+  .export-label { display: flex; align-items: center; gap: 9px; }
+  .file-icon { width: 27px; height: 30px; display: grid; place-items: center; border: 1px solid #dae6db; border-radius: 5px; background: #f3f7f1; color: #698673; font: 700 11px 'Manrope', sans-serif; }
+  .saturday-file { background: #faf5ef; border-color: #ebdfd1; color: #b38665; }
+  .export-label strong, .export-label small { display: block; }
+  .export-label strong { font-size: 10px; font-weight: 700; }
+  .export-label small { margin-top: 3px; color: #959a94; font-size: 9px; }
+  .download-button { min-width: 0; height: 30px; padding: 0 7px; display: grid; place-items: center; border: 1px solid #e5e9e2; border-radius: 6px; background: #fff; color: #526e59; cursor: pointer; font-size: 8px; font-weight: 800; letter-spacing: 0; white-space: nowrap; }
+  .download-button:hover { color: #fff; background: #547260; border-color: #547260; }
+  .export-note { margin-top: 15px; color: #969b95; font-size: 9px; line-height: 1.6; }
+  .export-note span { margin-right: 4px; color: #93a195; }
+  footer { display: flex; justify-content: space-between; padding: 23px 2px 30px; color: #a1a59e; font-size: 10px; }
+  @media (min-width: 1200px) { :global(.day-cell) { padding: 5px; gap: 4px; } :global(.person-select) { height: 26px; font-size: 11px; } :global(.day-note) { font-size: 9px; } }
+  @media (max-width: 960px) { .shell { width: min(100% - 40px, 800px); } .workspace { grid-template-columns: 1fr; } .export-panel { display: grid; grid-template-columns: 1fr 1fr; column-gap: 22px; } .export-heading, .export-divider, .export-note { grid-column: 1 / -1; } .export-divider { margin: 13px 0 3px; } .export-option { border-bottom: 0; } }
+  @media (max-width: 620px) { .shell { width: calc(100% - 28px); } .topbar { height: 62px; } .save-status { font-size: 10px; } .intro { padding: 15px 0 12px; } .tip-card { display: none; } h1 { font-size: 34px; } .intro-copy { max-width: 340px; font-size: 12px; line-height: 1.55; } .calendar-toolbar { height: 64px; padding: 0 12px; } .month-controls { gap: 7px; } .month-controls h2 { width: 160px; font-size: 18px; } .calendar-grid { grid-template-rows: 31px repeat(var(--week-count, 6), minmax(0, 1fr)); } :global(.day-cell) { padding: 3px 2px; gap: 2px; } :global(.weekday) { font-size: 9px; } :global(.person-select) { height: 23px; padding: 0 2px; font-size: 9px; } :global(.day-note) { padding: 3px; font-size: 8px; } :global(.day-number) { width: 17px; height: 17px; font-size: 10px; } .export-panel { padding: 15px 13px; } .export-label { gap: 6px; } .export-label strong { font-size: 9px; } .export-label small { font-size: 8px; } footer { gap: 12px; font-size: 9px; line-height: 1.5; } }
+  @media (max-width: 380px) { .save-status { max-width: 145px; } :global(.person-select) { font-size: 8px; } .month-controls h2 { width: 150px; font-size: 17px; } }
+</style>
