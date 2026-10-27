@@ -273,7 +273,7 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
           .filter(([date, record]) => date.startsWith(period) && record.person)
           .filter(([date, record]) => {
             const weekday = new Date(`${date}T12:00:00`).getDay();
-            return kind === 'saturday' ? weekday === 6 || isHoliday(record) : weekday >= 1 && weekday <= 5 && !isHoliday(record);
+            return kind === 'saturday' ? weekday === 0 || weekday === 6 || isHoliday(record) : weekday >= 1 && weekday <= 5 && !isHoliday(record);
           })
           .sort(([a], [b]) => a.localeCompare(b));
         const widths = [1949, 1949, 1949, 1949, 1949];
@@ -316,7 +316,7 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
             const date = keyFor(year, monthNumber, day);
             const record = records[date] || {};
             const weekday = new Date(year, monthNumber, day).getDay();
-            if (weekday !== 6 && !isHoliday(record)) continue;
+            if (weekday !== 0 && weekday !== 6 && !isHoliday(record)) continue;
             const dateLabel = new Date(year, monthNumber, day).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
             saturdayRows.push([dateLabel, reportNames[record.person] || '', '']);
           }
