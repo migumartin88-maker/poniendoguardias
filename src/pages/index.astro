@@ -316,9 +316,11 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
             const date = keyFor(year, monthNumber, day);
             const record = records[date] || {};
             const weekday = new Date(year, monthNumber, day).getDay();
-            if (weekday !== 0 && weekday !== 6 && !isHoliday(record)) continue;
+            const assignedSunday = weekday === 0 && Boolean(record.person);
+            if (weekday !== 6 && !isHoliday(record) && !assignedSunday) continue;
             const dateLabel = new Date(year, monthNumber, day).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-            saturdayRows.push([dateLabel, reportNames[record.person] || '', '']);
+            const formattedDateLabel = `${dateLabel[0].toLocaleUpperCase('es-ES')}${dateLabel.slice(1)}`;
+            saturdayRows.push([formattedDateLabel, reportNames[record.person] || record.person || '', '']);
           }
           body += wordTable(saturdayRows, [2800, 3000, 3945], { rowHeight: 1000 });
           body += wordParagraph('');
