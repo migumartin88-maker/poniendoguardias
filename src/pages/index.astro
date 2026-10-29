@@ -100,7 +100,7 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
           localStorage.setItem(MONTH_STORAGE_KEY, currentMonthKey());
-          if (!supabaseConfigured) status.textContent = 'Guardado en este dispositivo; falta configurar la sincronización';
+          if (!supabaseConfigured) status.textContent = 'Guardado automáticamente en este dispositivo; falta configurar la sincronización';
         } catch (error) {
           localStorageError = error;
           console.error('No se pudieron guardar los datos en este navegador.', error);
@@ -113,11 +113,11 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
         if (pendingSaves || pendingTimers.size) {
           status.textContent = 'Sincronizando cambios…';
         } else if (syncError) {
-          status.textContent = 'Error al compartir los cambios; siguen guardados en este dispositivo';
+          status.textContent = 'Guardado automáticamente en este dispositivo; error al compartir los cambios';
         } else if (localStorageError) {
           status.textContent = 'Calendario compartido; no se pudo guardar la copia local';
         } else {
-          status.textContent = 'Cambios guardados y compartidos';
+          status.textContent = 'Cambios guardados automáticamente y compartidos';
         }
       }
 

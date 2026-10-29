@@ -43,6 +43,7 @@ El calendario está configurado para acceso compartido sin inicio de sesión: cu
 
 - Cambia de mes con las flechas o vuelve al mes actual con «Hoy».
 - En cada fecha puedes asignar una persona y escribir una nota.
+- Los cambios se guardan automáticamente; no hay que pulsar ningún botón para guardar. En el mismo navegador se conserva una copia local y, con Supabase configurado, se comparten entre dispositivos.
 - Descarga documentos DOCX para tardes y sabados y festivos. El informe de tardes usa una cuadricula de lunes a viernes; el de sabados y festivos incluye una columna para la firma.
 - Para incluir un festivo entre semana en el documento «Sábados y festivos», escribe la palabra «festivo» en las notas de esa fecha.
 - Los registros se guardan en Supabase y se comparten entre quienes usan la aplicación. También se conserva una copia local en el navegador.
