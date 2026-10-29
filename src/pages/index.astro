@@ -1,5 +1,7 @@
 ---
 const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
 ---
 
 <!doctype html>
@@ -18,7 +20,7 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
           <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
           <span>jornadas<span class="brand-dot">.</span></span>
         </a>
-        <div class="save-status"><span class="status-dot"></span><span id="save-status">Guardado automáticamente</span></div>
+        <div class="save-status"><span class="status-dot"></span><span id="save-status">Conectando con el calendario compartido…</span></div>
       </header>
 
       <section class="intro" id="inicio">
@@ -46,10 +48,10 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
         </aside>
       </section>
 
-      <footer><span>Hecho para que organizarse sea un poco más fácil.</span><span>Los datos se guardan en este dispositivo.</span></footer>
+      <footer><span>Hecho para que organizarse sea un poco más fácil.</span><span>Los datos se comparten con el equipo.</span></footer>
     </main>
 
-    <script define:vars={{ people }}>
+    <script define:vars={{ people, supabaseUrl, supabaseAnonKey }}>
       const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
       const weekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
       const personColors = { 'ANDREA': 'andrea', 'JOSE LUIS': 'jose-luis', 'JUAN': 'juan', 'MIGUEL A.': 'miguel-a', 'NIEVES': 'nieves' };
@@ -62,8 +64,11 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
       };
       const STORAGE_KEY = 'jornadas-extraordinarias-v1';
       const MONTH_STORAGE_KEY = 'jornadas-extraordinarias-month-v1';
+      const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+      const supabaseRestUrl = supabaseConfigured ? `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/schedule_entries` : '';
       let visibleMonth = new Date();
       let records = {};
+      let localStorageError = null;
       try {
         const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
         if (stored && typeof stored === 'object' && !Array.isArray(stored)) records = stored;
@@ -72,12 +77,21 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
           const [savedYear, savedMonthNumber] = savedMonth.split('-').map(Number);
           visibleMonth = new Date(savedYear, savedMonthNumber - 1, 1);
         }
-      } catch { records = {}; }
+      } catch (error) {
+        localStorageError = error;
+        console.error('No se pudieron leer los datos guardados en este navegador.', error);
+      }
 
       const grid = document.querySelector('#calendar-grid');
       const title = document.querySelector('#month-title');
       const summary = document.querySelector('#month-summary');
       const status = document.querySelector('#save-status');
+      const pendingTimers = new Map();
+      const pendingDates = new Set();
+      let pendingSaves = 0;
+      let syncError = null;
+      let syncQueue = Promise.resolve();
+      let refreshInProgress = false;
       const pad = (n) => String(n).padStart(2, '0');
       const keyFor = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
       const currentMonthKey = () => `${visibleMonth.getFullYear()}-${pad(visibleMonth.getMonth() + 1)}`;
@@ -86,11 +100,169 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
           localStorage.setItem(MONTH_STORAGE_KEY, currentMonthKey());
-          status.textContent = 'Guardado automáticamente';
-          updateSummary();
-        } catch {
-          status.textContent = 'No se pudo guardar en este navegador';
+          if (!supabaseConfigured) status.textContent = 'Guardado en este dispositivo; falta configurar la sincronización';
+        } catch (error) {
+          localStorageError = error;
+          console.error('No se pudieron guardar los datos en este navegador.', error);
+          status.textContent = 'No se pudieron guardar los datos en este dispositivo';
         }
+        updateSummary();
+      }
+
+      function updateSyncStatus() {
+        if (pendingSaves || pendingTimers.size) {
+          status.textContent = 'Sincronizando cambios…';
+        } else if (syncError) {
+          status.textContent = 'Error al compartir los cambios; siguen guardados en este dispositivo';
+        } else if (localStorageError) {
+          status.textContent = 'Calendario compartido; no se pudo guardar la copia local';
+        } else {
+          status.textContent = 'Cambios guardados y compartidos';
+        }
+      }
+
+      function syncRecord(date, keepalive = false) {
+        const record = records[date] || { person: '', note: '' };
+        const headers = {
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=minimal',
+        };
+        return fetch(`${supabaseRestUrl}?on_conflict=date`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify([{ date, person: record.person || '', note: record.note || '' }]),
+          keepalive,
+        }).then((response) => {
+          if (!response.ok) throw new Error(`Supabase respondió ${response.status}: ${response.statusText}`);
+        });
+      }
+
+      function scheduleSharedSave(date, immediate = false, keepalive = false) {
+        if (!supabaseConfigured) return;
+        const previousTimer = pendingTimers.get(date);
+        if (previousTimer) window.clearTimeout(previousTimer);
+        pendingTimers.delete(date);
+
+        const enqueue = () => {
+          pendingTimers.delete(date);
+          pendingDates.add(date);
+          pendingSaves++;
+          updateSyncStatus();
+          syncQueue = syncQueue
+            .then(() => syncRecord(date, keepalive))
+            .then(() => {
+              pendingSaves--;
+              pendingDates.delete(date);
+              syncError = null;
+              updateSyncStatus();
+            })
+            .catch((error) => {
+              pendingSaves--;
+              pendingDates.delete(date);
+              syncError = error;
+              console.error(`No se pudo sincronizar la jornada ${date}.`, error);
+              updateSyncStatus();
+            });
+        };
+
+        if (immediate) {
+          enqueue();
+        } else {
+          pendingTimers.set(date, window.setTimeout(enqueue, 350));
+          updateSyncStatus();
+        }
+      }
+
+      function flushPendingSharedSaves() {
+        for (const [date, timer] of pendingTimers) {
+          window.clearTimeout(timer);
+          pendingTimers.delete(date);
+          scheduleSharedSave(date, true, true);
+        }
+      }
+
+      async function refreshSharedRecords() {
+        if (!supabaseConfigured || refreshInProgress || document.visibilityState === 'hidden') return;
+        refreshInProgress = true;
+        try {
+          const response = await fetch(`${supabaseRestUrl}?select=date,person,note&order=date.asc`, {
+            headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` },
+          });
+          if (!response.ok) throw new Error(`No se pudo actualizar el calendario compartido (${response.status}).`);
+          const entries = await response.json();
+          let changed = false;
+          for (const { date, person, note } of entries) {
+            if (pendingDates.has(date) || pendingTimers.has(date)) continue;
+            const previous = records[date] || { person: '', note: '' };
+            if (previous.person === person && previous.note === note) continue;
+            records[date] = { ...previous, person, note };
+            changed = true;
+
+            if (date.startsWith(`${currentMonthKey()}-`)) {
+              const cell = grid.querySelector(`[data-date="${date}"]`);
+              if (!cell) continue;
+              const select = cell.querySelector('.person-select');
+              if (select && document.activeElement !== select) {
+                select.value = person || '';
+                select.dataset.personColor = personColors[select.value] || '';
+              }
+              const noteField = cell.querySelector('.day-note');
+              if (noteField && document.activeElement !== noteField) noteField.value = note || '';
+            }
+          }
+          if (changed) save();
+          syncError = null;
+          updateSyncStatus();
+        } catch (error) {
+          syncError = error;
+          console.error('No se pudo actualizar el calendario compartido.', error);
+          updateSyncStatus();
+        } finally {
+          refreshInProgress = false;
+        }
+      }
+
+      async function initializeSharedRecords() {
+        if (!supabaseConfigured) {
+          status.textContent = 'Sin sincronización: configura Supabase para compartir los datos';
+          render();
+          return;
+        }
+
+        try {
+          const localEntries = Object.entries(records)
+            .filter(([date, record]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && (record.person || record.note?.trim()))
+            .map(([date, record]) => ({ date, person: record.person || '', note: record.note || '' }));
+          if (localEntries.length) {
+            const importResponse = await fetch(`${supabaseRestUrl}?on_conflict=date`, {
+              method: 'POST',
+              headers: {
+                apikey: supabaseAnonKey,
+                Authorization: `Bearer ${supabaseAnonKey}`,
+                'Content-Type': 'application/json',
+                Prefer: 'resolution=ignore-duplicates,return=minimal',
+              },
+              body: JSON.stringify(localEntries),
+            });
+            if (!importResponse.ok) throw new Error(`No se pudieron importar los datos locales (${importResponse.status}).`);
+          }
+
+          const response = await fetch(`${supabaseRestUrl}?select=date,person,note&order=date.asc`, {
+            headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` },
+          });
+          if (!response.ok) throw new Error(`No se pudo cargar el calendario compartido (${response.status}).`);
+          const entries = await response.json();
+          records = Object.fromEntries(entries.map(({ date, person, note }) => [date, { person, note, type: '' }]));
+          save();
+          updateSyncStatus();
+        } catch (error) {
+          syncError = error;
+          console.error('No se pudo cargar el calendario compartido.', error);
+          status.textContent = 'No se pudo cargar el calendario compartido; se muestran los datos locales';
+        }
+        render();
       }
 
       function updateSummary() {
@@ -142,6 +314,7 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
           const today = new Date();
           const isToday = date.toDateString() === today.toDateString();
           const cell = document.createElement('article');
+          cell.dataset.date = key;
           cell.className = `day-cell${saturday ? ' saturday' : ''}${isToday ? ' is-today' : ''}`;
           const dayTop = document.createElement('div');
           dayTop.className = 'day-top';
@@ -172,6 +345,7 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
             select.dataset.personColor = personColors[select.value] || '';
             records[key] = { ...records[key], person: select.value };
             save();
+            scheduleSharedSave(key, true);
           });
           cell.append(select);
 
@@ -182,9 +356,10 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
           note.value = saved.note || '';
           note.addEventListener('input', () => {
             records[key] = { ...records[key], note: note.value };
-            status.textContent = 'Guardando…';
             save();
+            scheduleSharedSave(key);
           });
+          note.addEventListener('blur', () => scheduleSharedSave(key, true));
           cell.append(note);
 
           grid.append(cell);
@@ -349,10 +524,19 @@ const people = ['ANDREA', 'JOSE LUIS', 'JUAN', 'MIGUEL A.', 'NIEVES'];
       document.querySelector('#next-month').addEventListener('click', () => { visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1); save(); render(); });
       document.querySelector('#today-button').addEventListener('click', () => { visibleMonth = new Date(); save(); render(); });
       document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', () => download(button.dataset.export)));
-      window.addEventListener('pagehide', save);
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(); });
+      window.addEventListener('pagehide', () => { save(); flushPendingSharedSaves(); });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          save();
+          flushPendingSharedSaves();
+        } else {
+          refreshSharedRecords();
+        }
+      });
       window.addEventListener('resize', () => setCalendarHeight());
-      render();
+      initializeSharedRecords().then(() => {
+        if (supabaseConfigured) window.setInterval(refreshSharedRecords, 5000);
+      });
     </script>
   </body>
 </html>
